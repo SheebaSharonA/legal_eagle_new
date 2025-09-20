@@ -172,27 +172,27 @@ const handleSaveDocument = async () => {
 };
 
  // Translate summary
-  const handleTranslate = async (text, tgt_lang) => {
-  if (!text || !tgt_lang) return;
+  // Translate summary
+const handleTranslate = async (text, targetLang) => {
+  if (!text || !targetLang) return;
   setLoading(true);
   setTranslatedText("");
 
   console.log("Text to translate:", text);
-  console.log("Target language:", tgt_lang);
+  console.log("Target language:", targetLang);
 
   try {
     const response = await axios.post("http://127.0.0.1:5001/translate", {
-      text: text,        // use the parameter, not summary
-      src_lang: "eng_Latn",
-      tgt_lang: tgt_lang  // use the parameter, not selectedLanguage
+      text: text,             // The text to translate
+      target_lang: targetLang // Matches backend key exactly
     });
 
     console.log("Translation response:", response.data);
 
-    if (response.data.translations && response.data.translations.length > 0) {
-      setTranslatedText(response.data.translations[0]);
+    if (response.data.translated_text) {
+      setTranslatedText(response.data.translated_text);
     } else {
-      console.warn("No translations returned from backend.");
+      console.warn("No translated_text returned from backend.");
     }
   } catch (err) {
     console.error(err);
@@ -377,11 +377,11 @@ const handleVerifyOtp = async () => {
             onChange={(e) => setSelectedLanguage(e.target.value)}
           >
             <option value="">Select Language</option>
-            <option value="hin_Deva">Hindi</option>
-            <option value="tam_Taml">Tamil</option>
-            <option value="tel_Telu">Telugu</option>
-            <option value="mal_Mlym">Malayalam</option>
-            <option value="kan_Knda">Kannada</option>
+            <option value="hi">Hindi</option>
+            <option value="ta">Tamil</option>
+            <option value="te">Telugu</option>
+            <option value="ml">Malayalam</option>
+            <option value="kn">Kannada</option>
           </select>
 
           {/* Translate Button */}

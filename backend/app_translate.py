@@ -1,169 +1,104 @@
-# from flask import Flask, request, jsonify
-# import torch
-# from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-# from IndicTransToolkit.processor import IndicProcessor
-
-# app = Flask(__name__)
-
-# # -----------------------------
-# # LOAD MODEL ONCE
-# # -----------------------------
-# DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# src_lang, tgt_lang = "eng_Latn", "hin_Deva"
-# model_name = "ai4bharat/indictrans2-en-indic-1B"
-
-# tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-# model = AutoModelForSeq2SeqLM.from_pretrained(
-#     model_name,
-#     trust_remote_code=True,
-#     dtype=torch.float32,          # CPU safe
-#     attn_implementation="eager"   # important fix for CPU
-# ).to(DEVICE)
-
-# ip = IndicProcessor(inference=True)
-
-# # -----------------------------
-# # TRANSLATE ENDPOINT
-# # -----------------------------
-# @app.route("/translate", methods=["POST"])
-# def translate():
-#     data = request.get_json(force=True)
-#     text = data.get("text")
-    
-#     if not text:
-#         return jsonify({"error": "Missing 'text' in request"}), 400
-
-#     try:
-#         # Accept either single string or list of sentences
-#         if isinstance(text, str):
-#             input_sentences = [text]
-#         elif isinstance(text, list):
-#             input_sentences = text
-#         else:
-#             return jsonify({"error": "'text' must be string or list of strings"}), 400
-
-#         # Preprocess with lang tags
-#         batch = ip.preprocess_batch(input_sentences, src_lang=src_lang, tgt_lang=tgt_lang)
-
-#         # Tokenize
-#         inputs = tokenizer(
-#             batch,
-#             truncation=True,
-#             padding="longest",
-#             return_tensors="pt",
-#             return_attention_mask=True,
-#         ).to(DEVICE)
-
-#         # Generate
-#         with torch.no_grad():
-#             generated_tokens = model.generate(
-#                 **inputs,
-#                 use_cache=False,   # fix NoneType bug
-#                 min_length=0,
-#                 max_length=256,
-#                 num_beams=5,
-#                 num_return_sequences=1,
-#             )
-
-#         # Decode
-#         decoded = tokenizer.batch_decode(
-#             generated_tokens,
-#             skip_special_tokens=True,
-#             clean_up_tokenization_spaces=True,
-#         )
-
-#         # Postprocess
-#         translations = ip.postprocess_batch(decoded, lang=tgt_lang)
-
-#         # Return JSON
-#         return jsonify({"translations": translations})
-
-#     except Exception as e:
-#         import traceback
-#         traceback.print_exc()
-#         return jsonify({"error": str(e)}), 500
-
-
-# if __name__ == "__main__":
-#     app.run(debug=True)
-
-import torch
 from flask import Flask, request, jsonify
-from load_model import model, tokenizer, ip, DEVICE, SRC_LANG, TGT_LANG
-from gtts import gTTS
 from flask_cors import CORS
+from deep_translator import GoogleTranslator
+from gtts import gTTS
+import uuid
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000"])
 
+# -----------------------------
+# Translate Endpoint (Google Translate)
+# -----------------------------
 @app.route("/translate", methods=["POST"])
 def translate():
+    """
+    Request:
+    {
+      "text": "Hello world",
+      "target_lang": "hi",
+      "filename": "optional_file_name.txt"
+    }
+    Response:
+    {
+      "translated_text": "...",
+      "audio_file": "optional_file_name.mp3"  # if used with TTS
+    }
+    """
     data = request.get_json(force=True)
     text = data.get("text")
-    src_lang = data.get("src_lang", "eng_Latn")      # default English
-    tgt_lang = data.get("tgt_lang", "hin_Deva")      # default Hindi
+    target_lang = data.get("target_lang", "en")
+    filename = data.get("filename")  # optional
 
     if not text:
         return jsonify({"error": "Missing 'text'"}), 400
 
-    input_sentences = [text] if isinstance(text, str) else text
-
     try:
-        # Preprocess
-        batch = ip.preprocess_batch(input_sentences, src_lang=src_lang, tgt_lang=tgt_lang)
+        # Translate
+        translated_text = GoogleTranslator(source="auto", target=target_lang).translate(text)
 
-        # Tokenize
-        inputs = tokenizer(batch, truncation=True, padding="longest", return_tensors="pt").to(DEVICE)
+        response = {
+            "original_text": text,
+            "translated_text": translated_text,
+            "target_lang": target_lang
+        }
 
-        # Generate
-        with torch.no_grad():
-            generated_tokens = model.generate(
-                **inputs,
-                use_cache=False,
-                min_length=0,
-                max_length=128,
-                num_beams=5,
-                num_return_sequences=1,
-            )
+        # Optionally save translation to a file
+        if filename:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(translated_text)
+            response["file_saved"] = filename
 
-        # Decode & postprocess
-        decoded = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-        translations = ip.postprocess_batch(decoded, lang=tgt_lang)
-
-        return jsonify({"translations": translations})
+        return jsonify(response)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
+
+# -----------------------------
+# Translate + TTS Endpoint
+# -----------------------------
 @app.route("/translate_tts_google", methods=["POST"])
 def translate_tts_google():
     """
-    Converts the given text into speech using Google TTS.
-    Expects JSON:
+    Request:
     {
-        "text": "Your text here",
-        "tgt_lang": "hi"  # 'hi' for Hindi, 'ta' for Tamil, 'te' for Telugu
+      "text": "Hello world",
+      "target_lang": "hi",
+      "filename": "optional_audio_name.mp3"
     }
-    Returns JSON:
+    Response:
     {
-        "audio_file": "output.mp3",
-        "translation": "Your text here"
+      "translated_text": "...",
+      "audio_file": "filename.mp3"
     }
     """
     data = request.get_json(force=True)
     text = data.get("text")
-    tgt_lang = data.get("tgt_lang", "hi")  # default Hindi
+    target_lang = data.get("target_lang", "hi")
+    filename = data.get("filename")
 
     if not text:
         return jsonify({"error": "Missing 'text'"}), 400
 
     try:
-        filename = "output.mp3"
-        # gTTS uses 2-letter language codes
-        tts = gTTS(text=text, lang=tgt_lang[:2])
+        # Translate
+        translated_text = GoogleTranslator(source="auto", target=target_lang).translate(text)
+
+        # Generate audio filename if not provided
+        if not filename:
+            filename = f"tts_{target_lang}_{uuid.uuid4().hex[:8]}.mp3"
+
+        # Text-to-Speech
+        tts = gTTS(text=translated_text, lang=target_lang[:2])
         tts.save(filename)
 
-        return jsonify({"audio_file": filename, "translation": text})
+        return jsonify({
+            "original_text": text,
+            "translated_text": translated_text,
+            "target_lang": target_lang,
+            "audio_file": filename
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
